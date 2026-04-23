@@ -2,6 +2,7 @@
   "expo": {
     "name": "mituni-absen",
     "slug": "mituni-absen",
+    "jsEngine": "hermes",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",

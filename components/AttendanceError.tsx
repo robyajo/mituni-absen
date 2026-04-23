@@ -2,11 +2,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
 import {
+  Dimensions,
   StyleSheet,
   Text,
-  View,
   TouchableOpacity,
-  Dimensions,
+  View,
 } from "react-native";
 import Animated, {
   FadeIn,
@@ -26,7 +26,7 @@ export default function AttendanceError({
   message,
   onClose,
 }: AttendanceErrorProps) {
-  const [countdown, setCountdown] = React.useState(5);
+  const [countdown, setCountdown] = React.useState(10);
 
   React.useEffect(() => {
     if (countdown > 0) {
@@ -46,7 +46,10 @@ export default function AttendanceError({
 
       <Animated.View entering={FadeIn} style={styles.content}>
         {/* Error Icon */}
-        <Animated.View entering={ZoomIn.delay(300)} style={styles.iconContainer}>
+        <Animated.View
+          entering={ZoomIn.delay(300)}
+          style={styles.iconContainer}
+        >
           <LinearGradient
             colors={["#ef4444", "#dc2626"]}
             style={styles.iconGradient}
@@ -65,7 +68,11 @@ export default function AttendanceError({
         {/* Info Card */}
         <Animated.View entering={FadeInDown.delay(700)} style={styles.card}>
           <View style={styles.infoRow}>
-            <Ionicons name="information-circle-outline" size={24} color="#ef4444" />
+            <Ionicons
+              name="information-circle-outline"
+              size={24}
+              color="#ef4444"
+            />
             <Text style={styles.infoText}>
               Silakan periksa koneksi internet atau coba beberapa saat lagi.
             </Text>
@@ -74,7 +81,11 @@ export default function AttendanceError({
 
         {/* Bottom Button */}
         <Animated.View entering={FadeInDown.delay(900)} style={styles.footer}>
-          <TouchableOpacity activeOpacity={0.8} onPress={onClose} style={styles.button}>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={onClose}
+            style={styles.button}
+          >
             <LinearGradient
               colors={["#ef4444", "#dc2626"]}
               start={{ x: 0, y: 0 }}

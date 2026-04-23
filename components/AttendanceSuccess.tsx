@@ -1,13 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 import { Image } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect } from "react";
 import {
+  Dimensions,
   StyleSheet,
   Text,
-  View,
   TouchableOpacity,
-  Dimensions,
+  View,
 } from "react-native";
 import Animated, {
   FadeIn,
@@ -41,7 +41,7 @@ export default function AttendanceSuccess({
   onClose,
 }: AttendanceSuccessProps) {
   const { user, jam_absen, attendance } = data;
-  const [countdown, setCountdown] = React.useState(5);
+  const [countdown, setCountdown] = React.useState(10);
 
   useEffect(() => {
     if (countdown > 0) {
@@ -61,7 +61,10 @@ export default function AttendanceSuccess({
 
       <Animated.View entering={FadeIn} style={styles.content}>
         {/* Success Icon */}
-        <Animated.View entering={ZoomIn.delay(300)} style={styles.iconContainer}>
+        <Animated.View
+          entering={ZoomIn.delay(300)}
+          style={styles.iconContainer}
+        >
           <LinearGradient
             colors={["#0d9488", "#0f766e"]}
             style={styles.iconGradient}
@@ -117,13 +120,17 @@ export default function AttendanceSuccess({
             <View style={styles.detailItem}>
               <Text style={styles.detailLabel}>Status</Text>
               <View style={styles.statusBadge}>
-                <Text style={styles.statusText}>{attendance.status.toUpperCase()}</Text>
+                <Text style={styles.statusText}>
+                  {attendance.status.toUpperCase()}
+                </Text>
               </View>
             </View>
             <View style={styles.detailItem}>
               <Text style={styles.detailLabel}>Lokasi</Text>
               <Text style={styles.detailValue} numberOfLines={1}>
-                {attendance.location === "Testing Location" ? "Kantor" : attendance.location}
+                {attendance.location === "Testing Location"
+                  ? "Kantor"
+                  : attendance.location}
               </Text>
             </View>
           </View>
@@ -131,7 +138,11 @@ export default function AttendanceSuccess({
 
         {/* Bottom Button */}
         <Animated.View entering={FadeInDown.delay(900)} style={styles.footer}>
-          <TouchableOpacity activeOpacity={0.8} onPress={onClose} style={styles.button}>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={onClose}
+            style={styles.button}
+          >
             <LinearGradient
               colors={["#0d9488", "#0f766e"]}
               start={{ x: 0, y: 0 }}

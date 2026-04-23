@@ -3,7 +3,7 @@ import {
   CameraView,
   useCameraPermissions,
 } from "expo-camera";
-import Constants from "expo-constants";
+import * as Haptics from "expo-haptics";
 import * as Location from "expo-location";
 import { Stack, useRouter } from "expo-router";
 import * as Speech from "expo-speech";
@@ -21,10 +21,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import AttendanceError from "../components/AttendanceError";
 import AttendanceSuccess from "../components/AttendanceSuccess";
 
-const API_URL =
-  Constants.expoConfig?.extra?.apiUrl ||
-  process.env.EXPO_PUBLIC_API_URL ||
-  "http://192.168.1.1:8000";
+const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:8000";
 
 const IS_DEBUG = process.env.EXPO_PUBLIC_APP_DEBUG === "true";
 const CLOCK_IN_URL = `${API_URL}/api/${IS_DEBUG ? "test/" : ""}attendance/clock-in`;
@@ -149,7 +146,15 @@ export default function AbsenScreen() {
       }
 
       console.log("[SCAN] Final UUID:", uuid);
+
+      // Feedback getaran agar user tahu QR sudah ter-scan
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
       const currentLoc = await fetchLocation();
+
+      // Berikan jeda sedikit agar user sempat menurunkan kartu QR
+      // dan kamera fokus ke wajah
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
       // Auto take photo and submit
       if (cameraRef.current) {
@@ -195,7 +200,13 @@ export default function AbsenScreen() {
         location: locationParam,
       });
 
-      const timestamp = new Date().toISOString();
+      const now = new Date();
+      const timestamp = new Date(
+        now.getTime() - now.getTimezoneOffset() * 60000,
+      )
+        .toISOString()
+        .replace("T", " ")
+        .split(".")[0];
       console.log("[ABSEN] Timestamp:", timestamp);
 
       const formData = new FormData();
@@ -237,13 +248,18 @@ export default function AbsenScreen() {
       console.log("[ABSEN] Response:", JSON.stringify(result, null, 2));
 
       if (result.success) {
-        Speech.speak("Absensi berhasil");
+        Speech.speak(result.message || "Absensi berhasil", {
+          language: "id-ID",
+        });
         setSuccessResult(result);
       } else {
         const errorMsg = result.errors
           ? Object.values(result.errors).flat().join("\n")
           : result.message;
         console.log("[ABSEN] Error Message:", errorMsg);
+        Speech.speak(errorMsg || "Absensi gagal", {
+          language: "id-ID",
+        });
         setErrorResult(errorMsg);
       }
     } catch (error: any) {
@@ -299,48 +315,50 @@ export default function AbsenScreen() {
       <Stack screenOptions={{ headerShown: false }} />
 
       <View style={styles.cameraContainer}>
-          <CameraView
-            ref={cameraRef}
-            style={styles.camera}
-            facing="front"
-            barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-            onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-          />
-          {loading && (
-            <View style={styles.loadingOverlay}>
-              <ActivityIndicator size="large" color="#fff" />
-              <Text style={styles.loadingText}>Memproses Absensi...</Text>
-            </View>
-          )}
-          <View style={styles.overlay}>
-            <View style={styles.scanArea}>
-              <View style={[styles.corner, styles.topLeft]} />
-              <View style={[styles.corner, styles.topRight]} />
-              <View style={[styles.corner, styles.bottomLeft]} />
-              <View style={[styles.corner, styles.bottomRight]} />
-            </View>
+        <CameraView
+          ref={cameraRef}
+          style={styles.camera}
+          facing="front"
+          barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+          onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+        />
+        {loading && (
+          <View style={styles.loadingOverlay}>
+            <ActivityIndicator size="large" color="#fff" />
+            <Text style={styles.loadingText}>Memproses Absensi...</Text>
           </View>
-          <View style={styles.instructions}>
-            <View style={styles.timerBadge}>
-              <Text style={styles.timerText}>Kembali ke Home dalam {inactivityCountdown}s</Text>
-            </View>
-            <Text style={styles.instructionText}>Scan QR Code Karyawan</Text>
-            {scanned && (
-              <TouchableOpacity
-                style={styles.scanAgainButton}
-                onPress={() => setScanned(false)}
-              >
-                <Text style={styles.scanAgainText}>Scan Lagi</Text>
-              </TouchableOpacity>
-            )}
+        )}
+        <View style={styles.overlay}>
+          <View style={styles.scanArea}>
+            <View style={[styles.corner, styles.topLeft]} />
+            <View style={[styles.corner, styles.topRight]} />
+            <View style={[styles.corner, styles.bottomLeft]} />
+            <View style={[styles.corner, styles.bottomRight]} />
           </View>
-          <TouchableOpacity
-            style={styles.closeButton}
-            onPress={() => router.back()}
-          >
-            <Text style={styles.closeButtonText}>Tutup</Text>
-          </TouchableOpacity>
         </View>
+        <View style={styles.instructions}>
+          <View style={styles.timerBadge}>
+            <Text style={styles.timerText}>
+              Kembali ke Home dalam {inactivityCountdown}s
+            </Text>
+          </View>
+          <Text style={styles.instructionText}>Scan QR Code Karyawan</Text>
+          {scanned && (
+            <TouchableOpacity
+              style={styles.scanAgainButton}
+              onPress={() => setScanned(false)}
+            >
+              <Text style={styles.scanAgainText}>Scan Lagi</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        <TouchableOpacity
+          style={styles.closeButton}
+          onPress={() => router.back()}
+        >
+          <Text style={styles.closeButtonText}>Tutup</Text>
+        </TouchableOpacity>
+      </View>
 
       {successResult && (
         <Modal visible={true} animationType="fade" transparent={false}>
@@ -396,9 +414,27 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.8,
     shadowRadius: 10,
   },
-  topLeft: { top: -2, left: -2, borderTopWidth: 5, borderLeftWidth: 5, borderTopLeftRadius: 12 },
-  topRight: { top: -2, right: -2, borderTopWidth: 5, borderRightWidth: 5, borderTopRightRadius: 12 },
-  bottomLeft: { bottom: -2, left: -2, borderBottomWidth: 5, borderLeftWidth: 5, borderBottomLeftRadius: 12 },
+  topLeft: {
+    top: -2,
+    left: -2,
+    borderTopWidth: 5,
+    borderLeftWidth: 5,
+    borderTopLeftRadius: 12,
+  },
+  topRight: {
+    top: -2,
+    right: -2,
+    borderTopWidth: 5,
+    borderRightWidth: 5,
+    borderTopRightRadius: 12,
+  },
+  bottomLeft: {
+    bottom: -2,
+    left: -2,
+    borderBottomWidth: 5,
+    borderLeftWidth: 5,
+    borderBottomLeftRadius: 12,
+  },
   bottomRight: {
     bottom: -2,
     right: -2,
@@ -406,7 +442,12 @@ const styles = StyleSheet.create({
     borderRightWidth: 5,
     borderBottomRightRadius: 12,
   },
-  instructions: { position: "absolute", bottom: 100, alignItems: "center", width: "100%" },
+  instructions: {
+    position: "absolute",
+    bottom: 100,
+    alignItems: "center",
+    width: "100%",
+  },
   timerBadge: {
     backgroundColor: "rgba(30, 41, 59, 0.8)",
     paddingHorizontal: 16,
@@ -421,14 +462,14 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
   },
-  instructionText: { 
-    color: "#fff", 
-    fontSize: 18, 
+  instructionText: {
+    color: "#fff",
+    fontSize: 18,
     fontWeight: "700",
     textShadowColor: "rgba(0,0,0,0.5)",
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
-    marginBottom: 16 
+    marginBottom: 16,
   },
   scanAgainButton: {
     backgroundColor: "#0d9488",
@@ -481,7 +522,12 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     width: "100%",
   },
-  buttonText: { color: "#fff", fontSize: 18, fontWeight: "700", textAlign: "center" },
+  buttonText: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "700",
+    textAlign: "center",
+  },
   buttonSecondary: { paddingHorizontal: 32, paddingVertical: 16 },
   buttonTextSecondary: { color: "#94a3b8", fontSize: 16, fontWeight: "500" },
   loadingOverlay: {

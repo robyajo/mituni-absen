@@ -1,5 +1,12 @@
 ## Get started di Android Studio / Device
 
+0. Cek Device
+
+   ```bash
+   npm uninstall react-native-web react-dom
+
+   ```
+
 1. Cek Device
 
    ```bash
@@ -14,4 +21,20 @@
 
    ```bash
    npm run android
+
+   ```
+
+## Get started build windows
+
+0. Cek Device
+
+   ```bash
+   cd android
+
+   ```
+
+1. Cek Device
+
+   ```bash
+   .\gradlew.bat assembleRelease
    ```

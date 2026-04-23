@@ -4,11 +4,10 @@ import {
   useCameraPermissions,
 } from "expo-camera";
 import Constants from "expo-constants";
-import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { Stack, useRouter } from "expo-router";
 import * as Speech from "expo-speech";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,13 +18,18 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import AttendanceError from "../components/AttendanceError";
+import AttendanceSuccess from "../components/AttendanceSuccess";
 
 const API_URL =
   Constants.expoConfig?.extra?.apiUrl ||
   process.env.EXPO_PUBLIC_API_URL ||
   "http://192.168.1.1:8000";
-const CLOCK_IN_URL = `${API_URL}/api/test/attendance/clock-in`;
-const CLOCK_OUT_URL = `${API_URL}/api/test/attendance/clock-out`;
+
+const IS_DEBUG = process.env.EXPO_PUBLIC_APP_DEBUG === "true";
+const CLOCK_IN_URL = `${API_URL}/api/${IS_DEBUG ? "test/" : ""}attendance/clock-in`;
+const CLOCK_OUT_URL = `${API_URL}/api/${IS_DEBUG ? "test/" : ""}attendance/clock-out`;
+const SUBMIT_URL = `${API_URL}/api/${IS_DEBUG ? "test/" : ""}attendance/submit`;
 
 interface EmployeeQRData {
   uuid: string;
@@ -59,6 +63,7 @@ interface ApiErrorResponse {
 }
 
 export default function AbsenScreen() {
+  const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
@@ -69,21 +74,44 @@ export default function AbsenScreen() {
   const [loading, setLoading] = useState(false);
   const [location, setLocation] = useState<string | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
-  const [showForm, setShowForm] = useState(false);
+  const [successResult, setSuccessResult] = useState<any | null>(null);
+  const [errorResult, setErrorResult] = useState<string | null>(null);
+  const [inactivityCountdown, setInactivityCountdown] = useState(120); // 2 minutes
   const router = useRouter();
 
-  const fetchLocation = async () => {
+  // 2-minute inactivity timeout with visible countdown
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setInactivityCountdown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (inactivityCountdown === 0) {
+      console.log("[ABSEN] Inactivity timeout reached");
+      router.back();
+    }
+  }, [inactivityCountdown]);
+
+  const fetchLocation = async (): Promise<string> => {
     setLocationLoading(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") {
-        setLocation("Kantor");
-        return;
+        const fallback = "Kantor";
+        setLocation(fallback);
+        return fallback;
       }
       const loc = await Location.getCurrentPositionAsync({});
-      setLocation(`${loc.coords.latitude},${loc.coords.longitude}`);
+      const coords = `${loc.coords.latitude},${loc.coords.longitude}`;
+      setLocation(coords);
+      return coords;
     } catch {
-      setLocation("Kantor");
+      const fallback = "Kantor";
+      setLocation(fallback);
+      return fallback;
     } finally {
       setLocationLoading(false);
     }
@@ -121,8 +149,21 @@ export default function AbsenScreen() {
       }
 
       console.log("[SCAN] Final UUID:", uuid);
-      await fetchLocation();
-      setShowForm(true);
+      const currentLoc = await fetchLocation();
+
+      // Auto take photo and submit
+      if (cameraRef.current) {
+        setLoading(true);
+        const photo = await cameraRef.current.takePictureAsync({
+          quality: 0.7,
+        });
+        if (photo) {
+          submitAbsensi(uuid, currentLoc, photo.uri);
+        } else {
+          setLoading(false);
+          setScanned(false);
+        }
+      }
     } catch (e) {
       console.log("[SCAN] Error:", e);
       Alert.alert("QR Code Tidak Valid", "QR Code tidak valid untuk absensi", [
@@ -132,20 +173,16 @@ export default function AbsenScreen() {
   };
 
   const submitAbsensi = async (
+    uuid: string,
+    locationParam: string,
     photoUri: string,
-    absenTypeParam?: "clock-in" | "clock-out",
   ) => {
-    const type = absenTypeParam || absenType;
-
     console.log("[ABSEN] submitAbsensi called");
-    console.log("[ABSEN] employeeData:", employeeData);
-    console.log("[ABSEN] absenType (param):", absenTypeParam);
-    console.log("[ABSEN] absenType (state):", absenType);
-    console.log("[ABSEN] Final type:", type);
-    console.log("[ABSEN] location:", location);
+    console.log("[ABSEN] uuid:", uuid);
+    console.log("[ABSEN] location:", locationParam);
     console.log("[ABSEN] photoUri:", photoUri);
 
-    if (!employeeData?.uuid || !type) {
+    if (!uuid) {
       console.log("[ABSEN] Missing data - returning");
       Alert.alert("Error", "Data tidak lengkap");
       return;
@@ -154,22 +191,21 @@ export default function AbsenScreen() {
     setLoading(true);
     try {
       console.log("[ABSEN] Submitting:", {
-        uuid: employeeData.uuid,
-        absenType: type,
-        location,
+        uuid,
+        location: locationParam,
       });
 
       const timestamp = new Date().toISOString();
       console.log("[ABSEN] Timestamp:", timestamp);
 
       const formData = new FormData();
-      formData.append("uuid", employeeData.uuid);
+      formData.append("uuid", uuid);
       formData.append("timestamp", timestamp);
-      formData.append("location", location || "");
+      formData.append("location", locationParam || "");
 
-      console.log("[ABSEN] uuid:", employeeData.uuid);
+      console.log("[ABSEN] uuid:", uuid);
       console.log("[ABSEN] timestamp:", timestamp);
-      console.log("[ABSEN] location:", location || "");
+      console.log("[ABSEN] location:", locationParam || "");
       console.log("[ABSEN] photoUri:", photoUri);
 
       const filename = photoUri.split("/").pop() || "photo.jpg";
@@ -188,7 +224,7 @@ export default function AbsenScreen() {
         type: imageType,
       } as any);
 
-      const url = type === "clock-in" ? CLOCK_IN_URL : CLOCK_OUT_URL;
+      const url = SUBMIT_URL; // Always use unified submit
       console.log("[ABSEN] URL:", url);
 
       const response = await fetch(url, {
@@ -201,87 +237,30 @@ export default function AbsenScreen() {
       console.log("[ABSEN] Response:", JSON.stringify(result, null, 2));
 
       if (result.success) {
-        const { user, jam_absen } = result;
-        const message = user
-          ? `${type === "clock-in" ? "Clock In" : "Clock Out"} berhasil!\n\n${user.name} (${user.role})\nJam: ${jam_absen}`
-          : `${type === "clock-in" ? "Clock In" : "Clock Out"} berhasil!`;
-        Alert.alert("Berhasil", message, [
-          { text: "OK", onPress: () => router.back() },
-        ]);
         Speech.speak("Absensi berhasil");
+        setSuccessResult(result);
       } else {
         const errorMsg = result.errors
           ? Object.values(result.errors).flat().join("\n")
           : result.message;
         console.log("[ABSEN] Error Message:", errorMsg);
-        Alert.alert("Gagal", errorMsg, [
-          { text: "OK", onPress: () => setLoading(false) },
-        ]);
+        setErrorResult(errorMsg);
       }
     } catch (error: any) {
-      console.log("[ABSEN] Catch Error:", error?.message || error?.toString() || error);
+      console.log(
+        "[ABSEN] Catch Error:",
+        error?.message || error?.toString() || error,
+      );
       console.log("[ABSEN] Catch Error Full:", JSON.stringify(error, null, 2));
-      Alert.alert("Gagal", `Terjadi kesalahan: ${error?.message || "Jaringan tidak stabil"}`, [
-        { text: "OK", onPress: () => setLoading(false) },
-      ]);
+      setErrorResult(
+        error?.message || "Jaringan tidak stabil atau server tidak merespons",
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAbsen = async (type: "clock-in" | "clock-out") => {
-    setAbsenType(type);
-
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert(
-        "Izin Diperlukan",
-        "Izin galeri diperlukan untuk upload foto",
-        [{ text: "OK" }],
-      );
-      return;
-    }
-
-    Alert.alert("Ambil Foto", "Pilih sumber foto", [
-      {
-        text: "Kamera",
-        onPress: async () => {
-          const camStatus = await ImagePicker.requestCameraPermissionsAsync();
-          if (camStatus.status !== "granted") {
-            Alert.alert("Izin Diperlukan", "Izin kamera diperlukan", [
-              { text: "OK" },
-            ]);
-            return;
-          }
-          const result = await ImagePicker.launchCameraAsync({
-            mediaTypes: ["images"],
-            allowsEditing: true,
-            quality: 0.8,
-          });
-          if (!result.canceled && result.assets[0]) {
-            submitAbsensi(result.assets[0].uri, type);
-          } else {
-            setLoading(false);
-          }
-        },
-      },
-      {
-        text: "Galeri",
-        onPress: async () => {
-          const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ["images"],
-            allowsEditing: true,
-            quality: 0.8,
-          });
-          if (!result.canceled && result.assets[0]) {
-            submitAbsensi(result.assets[0].uri, type);
-          } else {
-            setLoading(false);
-          }
-        },
-      },
-    ]);
-  };
+  // handleAbsen is no longer needed as it's automatic
 
   if (!permission || !cameraPermission) {
     return <View style={styles.container} />;
@@ -319,103 +298,20 @@ export default function AbsenScreen() {
     <SafeAreaView style={styles.container}>
       <Stack screenOptions={{ headerShown: false }} />
 
-      <Modal
-        visible={showForm}
-        animationType="slide"
-        presentationStyle="pageSheet"
-      >
-        <View style={styles.formContainer}>
-          <View style={styles.formHeader}>
-            <Text style={styles.formTitle}>Konfirmasi Absensi</Text>
-            <TouchableOpacity
-              onPress={() => {
-                setShowForm(false);
-                setScanned(false);
-                setEmployeeData(null);
-                setAbsenType(null);
-              }}
-            >
-              <Text style={styles.closeText}>X</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.employeeInfo}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {employeeData?.name?.[0] || "?"}
-              </Text>
-            </View>
-            <Text style={styles.employeeName}>
-              {employeeData?.name || "Karyawan"}
-            </Text>
-            <Text style={styles.employeeId}>ID: {employeeData?.uuid}</Text>
-          </View>
-
-          <View style={styles.locationInfo}>
-            <Text style={styles.locationLabel}>Lokasi:</Text>
-            {locationLoading ? (
-              <ActivityIndicator size="small" />
-            ) : (
-              <Text style={styles.locationValue}>{location}</Text>
-            )}
-          </View>
-          <View style={styles.locationInfo}>
-            <Text style={styles.locationLabel}>UUID:</Text>
-            {locationLoading ? (
-              <ActivityIndicator size="small" />
-            ) : (
-              <Text style={styles.locationValue}>{employeeData?.uuid}</Text>
-            )}
-          </View>
-          <View style={styles.locationInfo}>
-            <Text style={styles.locationLabel}>Time:</Text>
-            {locationLoading ? (
-              <ActivityIndicator size="small" />
-            ) : (
-              <Text style={styles.locationValue}>
-                {new Date().toLocaleString()}
-              </Text>
-            )}
-          </View>
-
-          <View style={styles.typeContainer}>
-            <Text style={styles.typeLabel}>Pilih Jenis Absensi:</Text>
-            <View style={styles.typeButtons}>
-              <TouchableOpacity
-                style={[styles.typeButton, styles.clockInButton]}
-                onPress={() => handleAbsen("clock-in")}
-                disabled={loading}
-              >
-                {loading && absenType === "clock-in" ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.typeButtonText}>Clock In</Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.typeButton, styles.clockOutButton]}
-                onPress={() => handleAbsen("clock-out")}
-                disabled={loading}
-              >
-                {loading && absenType === "clock-out" ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.typeButtonText}>Clock Out</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {!showForm && (
-        <View style={styles.cameraContainer}>
+      <View style={styles.cameraContainer}>
           <CameraView
+            ref={cameraRef}
             style={styles.camera}
-            facing="back"
+            facing="front"
             barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
             onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
           />
+          {loading && (
+            <View style={styles.loadingOverlay}>
+              <ActivityIndicator size="large" color="#fff" />
+              <Text style={styles.loadingText}>Memproses Absensi...</Text>
+            </View>
+          )}
           <View style={styles.overlay}>
             <View style={styles.scanArea}>
               <View style={[styles.corner, styles.topLeft]} />
@@ -425,6 +321,9 @@ export default function AbsenScreen() {
             </View>
           </View>
           <View style={styles.instructions}>
+            <View style={styles.timerBadge}>
+              <Text style={styles.timerText}>Kembali ke Home dalam {inactivityCountdown}s</Text>
+            </View>
             <Text style={styles.instructionText}>Scan QR Code Karyawan</Text>
             {scanned && (
               <TouchableOpacity
@@ -442,23 +341,48 @@ export default function AbsenScreen() {
             <Text style={styles.closeButtonText}>Tutup</Text>
           </TouchableOpacity>
         </View>
+
+      {successResult && (
+        <Modal visible={true} animationType="fade" transparent={false}>
+          <AttendanceSuccess
+            data={successResult}
+            onClose={() => {
+              setSuccessResult(null);
+              router.back();
+            }}
+          />
+        </Modal>
+      )}
+
+      {errorResult && (
+        <Modal visible={true} animationType="fade" transparent={false}>
+          <AttendanceError
+            message={errorResult}
+            onClose={() => {
+              setErrorResult(null);
+              setLoading(false);
+              setScanned(false);
+            }}
+          />
+        </Modal>
       )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#000" },
+  container: { flex: 1, backgroundColor: "#042f2e" },
   cameraContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
   camera: { flex: 1, width: "100%" },
   overlay: {
     ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(4, 47, 46, 0.4)",
     justifyContent: "center",
     alignItems: "center",
   },
   scanArea: {
-    width: 250,
-    height: 250,
+    width: 260,
+    height: 260,
     backgroundColor: "transparent",
     position: "relative",
   },
@@ -466,117 +390,111 @@ const styles = StyleSheet.create({
     position: "absolute",
     width: 40,
     height: 40,
-    borderColor: "#007AFF",
+    borderColor: "#0d9488",
+    shadowColor: "#0d9488",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 10,
   },
-  topLeft: { top: 0, left: 0, borderTopWidth: 4, borderLeftWidth: 4 },
-  topRight: { top: 0, right: 0, borderTopWidth: 4, borderRightWidth: 4 },
-  bottomLeft: { bottom: 0, left: 0, borderBottomWidth: 4, borderLeftWidth: 4 },
+  topLeft: { top: -2, left: -2, borderTopWidth: 5, borderLeftWidth: 5, borderTopLeftRadius: 12 },
+  topRight: { top: -2, right: -2, borderTopWidth: 5, borderRightWidth: 5, borderTopRightRadius: 12 },
+  bottomLeft: { bottom: -2, left: -2, borderBottomWidth: 5, borderLeftWidth: 5, borderBottomLeftRadius: 12 },
   bottomRight: {
-    bottom: 0,
-    right: 0,
-    borderBottomWidth: 4,
-    borderRightWidth: 4,
+    bottom: -2,
+    right: -2,
+    borderBottomWidth: 5,
+    borderRightWidth: 5,
+    borderBottomRightRadius: 12,
   },
-  instructions: { position: "absolute", bottom: 100, alignItems: "center" },
-  instructionText: { color: "#fff", fontSize: 16, marginBottom: 16 },
+  instructions: { position: "absolute", bottom: 100, alignItems: "center", width: "100%" },
+  timerBadge: {
+    backgroundColor: "rgba(30, 41, 59, 0.8)",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  timerText: {
+    color: "#94a3b8",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  instructionText: { 
+    color: "#fff", 
+    fontSize: 18, 
+    fontWeight: "700",
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+    marginBottom: 16 
+  },
   scanAgainButton: {
-    backgroundColor: "#007AFF",
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
+    backgroundColor: "#0d9488",
+    paddingHorizontal: 28,
+    paddingVertical: 14,
+    borderRadius: 14,
+    shadowColor: "#0d9488",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
-  scanAgainText: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  scanAgainText: { color: "#fff", fontSize: 16, fontWeight: "700" },
   closeButton: {
     position: "absolute",
     bottom: 40,
     alignSelf: "center",
-    backgroundColor: "rgba(255,255,255,0.2)",
-    paddingHorizontal: 32,
-    paddingVertical: 12,
-    borderRadius: 8,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    paddingHorizontal: 36,
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
   },
-  closeButtonText: { color: "#fff", fontSize: 16 },
+  closeButtonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
   permissionContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     padding: 24,
+    backgroundColor: "#0f172a",
   },
   permissionTitle: {
-    fontSize: 24,
-    fontWeight: "bold",
+    fontSize: 26,
+    fontWeight: "800",
     color: "#fff",
     marginBottom: 16,
   },
   permissionText: {
     fontSize: 16,
-    color: "#aaa",
+    color: "#94a3b8",
     textAlign: "center",
-    marginBottom: 32,
+    marginBottom: 40,
+    lineHeight: 24,
   },
   button: {
-    backgroundColor: "#007AFF",
-    paddingHorizontal: 32,
-    paddingVertical: 16,
-    borderRadius: 12,
+    backgroundColor: "#0d9488",
+    paddingHorizontal: 40,
+    paddingVertical: 18,
+    borderRadius: 16,
     marginBottom: 16,
+    width: "100%",
   },
-  buttonText: { color: "#fff", fontSize: 18, fontWeight: "600" },
+  buttonText: { color: "#fff", fontSize: 18, fontWeight: "700", textAlign: "center" },
   buttonSecondary: { paddingHorizontal: 32, paddingVertical: 16 },
-  buttonTextSecondary: { color: "#aaa", fontSize: 16 },
-  formContainer: { flex: 1, backgroundColor: "#fff", padding: 24 },
-  formHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 24,
-    paddingTop: 16,
-  },
-  formTitle: { fontSize: 24, fontWeight: "bold", color: "#1a1a1a" },
-  closeText: { fontSize: 24, color: "#666" },
-  employeeInfo: { alignItems: "center", marginBottom: 32 },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: "#007AFF",
+  buttonTextSecondary: { color: "#94a3b8", fontSize: 16, fontWeight: "500" },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(4, 47, 46, 0.8)",
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 16,
   },
-  avatarText: { fontSize: 32, color: "#fff", fontWeight: "bold" },
-  employeeName: {
-    fontSize: 24,
-    fontWeight: "600",
-    color: "#1a1a1a",
-    marginBottom: 4,
+  loadingText: {
+    color: "#fff",
+    marginTop: 16,
+    fontSize: 18,
+    fontWeight: "700",
+    letterSpacing: 0.5,
   },
-  employeeId: { fontSize: 14, color: "#666" },
-  locationInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 32,
-    padding: 16,
-    backgroundColor: "#f5f5f5",
-    borderRadius: 12,
-  },
-  locationLabel: { fontSize: 14, color: "#666", marginRight: 8 },
-  locationValue: { fontSize: 14, color: "#1a1a1a", flex: 1 },
-  typeContainer: { flex: 1 },
-  typeLabel: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#1a1a1a",
-    marginBottom: 16,
-  },
-  typeButtons: { flexDirection: "row", gap: 16 },
-  typeButton: {
-    flex: 1,
-    paddingVertical: 20,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  typeButtonText: { color: "#fff", fontSize: 18, fontWeight: "600" },
-  clockInButton: { backgroundColor: "#34C759" },
-  clockOutButton: { backgroundColor: "#FF3B30" },
 });

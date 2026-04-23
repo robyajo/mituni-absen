@@ -1,3 +1,5 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Ionicons } from "@expo/vector-icons";
 import {
   BarcodeScanningResult,
   CameraView,
@@ -21,12 +23,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import AttendanceError from "../components/AttendanceError";
 import AttendanceSuccess from "../components/AttendanceSuccess";
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:8000";
-
-const IS_DEBUG = process.env.EXPO_PUBLIC_APP_DEBUG === "true";
-const CLOCK_IN_URL = `${API_URL}/api/${IS_DEBUG ? "test/" : ""}attendance/clock-in`;
-const CLOCK_OUT_URL = `${API_URL}/api/${IS_DEBUG ? "test/" : ""}attendance/clock-out`;
-const SUBMIT_URL = `${API_URL}/api/${IS_DEBUG ? "test/" : ""}attendance/submit`;
+const DEFAULT_API_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:8000";
+const STORAGE_KEY = "@device_config";
 
 interface EmployeeQRData {
   uuid: string;
@@ -74,7 +72,61 @@ export default function AbsenScreen() {
   const [successResult, setSuccessResult] = useState<any | null>(null);
   const [errorResult, setErrorResult] = useState<string | null>(null);
   const [inactivityCountdown, setInactivityCountdown] = useState(120); // 2 minutes
+  const [config, setConfig] = useState({
+    apiUrl: DEFAULT_API_URL,
+    isDebug: false, // Ditentukan oleh API/Storage
+    deviceName: "Default",
+  });
+  const [configLoading, setConfigLoading] = useState(false);
   const router = useRouter();
+
+  // Load config from storage
+  useEffect(() => {
+    loadSavedConfig();
+  }, []);
+
+  const loadSavedConfig = async () => {
+    try {
+      const saved = await AsyncStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setConfig({
+          apiUrl: parsed.url || DEFAULT_API_URL,
+          isDebug: parsed.debug_mode === "active",
+          deviceName: parsed.name || "Default",
+        });
+      }
+    } catch (e) {
+      console.log("[CONFIG] Failed to load config:", e);
+    }
+  };
+
+  const refreshConfig = async () => {
+    setConfigLoading(true);
+    try {
+      const response = await fetch(`${DEFAULT_API_URL}/api/devices/active`);
+      const result = await response.json();
+
+      if (result.success && result.device) {
+        const device = result.device;
+        const newConfig = {
+          apiUrl: device.url || DEFAULT_API_URL,
+          isDebug: device.debug_mode === "active",
+          deviceName: device.name || "Default",
+        };
+        
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(device));
+        setConfig(newConfig);
+        Alert.alert("Sukses", `Konfigurasi diperbarui: ${device.name}`);
+      } else {
+        throw new Error("Gagal mengambil data perangkat");
+      }
+    } catch (e: any) {
+      Alert.alert("Error", "Gagal memperbarui konfigurasi: " + e.message);
+    } finally {
+      setConfigLoading(false);
+    }
+  };
 
   // 2-minute inactivity timeout with visible countdown
   useEffect(() => {
@@ -235,10 +287,10 @@ export default function AbsenScreen() {
         type: imageType,
       } as any);
 
-      const url = SUBMIT_URL; // Always use unified submit
-      console.log("[ABSEN] URL:", url);
+      const submitUrl = `${config.apiUrl}/api/${config.isDebug ? "test/" : ""}attendance/submit`;
+      console.log("[ABSEN] URL:", submitUrl);
 
-      const response = await fetch(url, {
+      const response = await fetch(submitUrl, {
         method: "POST",
         body: formData,
       });
@@ -357,6 +409,22 @@ export default function AbsenScreen() {
           onPress={() => router.back()}
         >
           <Text style={styles.closeButtonText}>Tutup</Text>
+        </TouchableOpacity>
+
+        {/* Refresh Config Button */}
+        <TouchableOpacity
+          style={styles.refreshButton}
+          onPress={refreshConfig}
+          disabled={configLoading}
+        >
+          <Ionicons 
+            name={configLoading ? "sync" : "refresh-circle"} 
+            size={24} 
+            color="#fff" 
+          />
+          <Text style={styles.refreshButtonText}>
+            {configLoading ? "Syncing..." : config.deviceName}
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -494,6 +562,25 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.1)",
   },
   closeButtonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  refreshButton: {
+    position: "absolute",
+    top: 50,
+    right: 20,
+    backgroundColor: "rgba(13, 148, 136, 0.8)",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  refreshButtonText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+    marginLeft: 6,
+  },
   permissionContainer: {
     flex: 1,
     justifyContent: "center",

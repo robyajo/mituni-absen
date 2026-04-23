@@ -26,15 +26,53 @@
 
 ## Get started build windows
 
-0. Cek Device
+0. Masuk folder android
+
+   ```bash
+   npx expo prebuild
+
+   ```
+
+1. Masuk folder android
 
    ```bash
    cd android
 
    ```
 
-1. Cek Device
+2. Build
 
    ```bash
    .\gradlew.bat assembleRelease
+   ```
+
+## Get started build mac
+
+0. Masuk folder android
+
+   ```bash
+   npx expo prebuild
+
+   ```
+
+1. Masuk folder android
+
+   ```bash
+   cd android
+
+   ```
+
+2. Build
+
+   ```bash
+   ./gradlew assembleRelease
+   ```
+
+## Get started prebuild (mau build windows atau mac)
+
+0. Masuk folder android
+
+   ```bash
+   npx expo prebuild --clean
+
    ```

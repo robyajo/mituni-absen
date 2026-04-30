@@ -48,3 +48,21 @@ Join our community of developers creating universal apps.
 
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+
+## Build Android APK
+
+When you're ready, run:
+
+```bash
+npm run android
+
+cd android
+./gradlew app:assembleDebug
+```
+
+release APK, run:
+
+```bash
+cd android
+./gradlew app:assembleRelease
+```
